@@ -395,6 +395,31 @@ selected_model = st.selectbox(
     ]
 )
 
+# ----------------------------------------------------------
+# OPTIONAL ACTUAL VALUE FOR MANUAL PREDICTION COMPARISON
+# ----------------------------------------------------------
+
+compare_manual = st.checkbox(
+    "📈 Compare with Actual Parts Per Hour",
+    help=(
+        "Enter the actual production value if it is known. "
+        "This value is used only for the Actual vs Predicted graph "
+        "and is not passed to the ML model."
+    )
+)
+
+actual_parts_per_hour = None
+
+if compare_manual:
+
+    actual_parts_per_hour = st.number_input(
+        "Actual Parts Per Hour",
+        min_value=0.0,
+        value=0.0,
+        step=0.01,
+        format="%.2f"
+    )
+
 
 if st.button(
     "🔮 Predict Parts Per Hour",
@@ -610,6 +635,56 @@ if st.button(
 
 
         # --------------------------------------------------
+        # ACTUAL VS PREDICTED - MANUAL INPUT
+        # --------------------------------------------------
+
+        if compare_manual and actual_parts_per_hour is not None:
+
+            st.subheader(
+                "📈 Actual vs Predicted - Manual Input"
+            )
+
+            manual_comparison_df = pd.DataFrame(
+                {
+                    "Actual": [float(actual_parts_per_hour)],
+                    "Predicted": [float(prediction)]
+                },
+                index=["Current Input"]
+            )
+
+            st.bar_chart(
+                manual_comparison_df,
+                y=["Actual", "Predicted"],
+                height=350
+            )
+
+            manual_error = (
+                float(actual_parts_per_hour) - float(prediction)
+            )
+
+            manual_abs_error = abs(manual_error)
+
+            metric_col1, metric_col2 = st.columns(2)
+
+            with metric_col1:
+                st.metric(
+                    "Absolute Error",
+                    f"{manual_abs_error:.2f} Parts/Hour"
+                )
+
+            with metric_col2:
+                st.metric(
+                    "Actual - Predicted",
+                    f"{manual_error:.2f} Parts/Hour"
+                )
+
+            st.caption(
+                "The actual value is used only for comparison; "
+                "it is not used as a model input."
+            )
+
+
+        # --------------------------------------------------
         # INPUT SUMMARY
         # --------------------------------------------------
 
@@ -622,9 +697,6 @@ if st.button(
             "the following machine parameters:"
         )
 
-        # Convert the transposed input summary to a clean
-        # two-column dataframe so Streamlit/PyArrow does not
-        # encounter mixed numeric/string types in one column.
         input_summary = (
             input_data.T
             .reset_index()
@@ -636,8 +708,7 @@ if st.button(
         ]
 
         input_summary["Value"] = (
-            input_summary["Value"]
-            .astype(str)
+            input_summary["Value"].astype(str)
         )
 
         st.dataframe(
@@ -772,6 +843,18 @@ if uploaded_file is not None:
         ):
 
             prediction_df = uploaded_df.copy()
+
+            # Keep the actual target separately for the
+            # Actual vs Predicted batch graph. It is never
+            # passed into the prediction model.
+            batch_actual = None
+
+            if "Parts_Per_Hour" in uploaded_df.columns:
+
+                batch_actual = pd.to_numeric(
+                    uploaded_df["Parts_Per_Hour"],
+                    errors="coerce"
+                )
 
 
             # ==================================================
@@ -1020,6 +1103,109 @@ if uploaded_file is not None:
                     result_df.astype(str),
                     width="stretch"
                 )
+
+
+                # ==================================================
+                # ACTUAL VS PREDICTED - BATCH CSV
+                # ==================================================
+
+                if batch_actual is not None:
+
+                    batch_graph_df = pd.DataFrame(
+                        {
+                            "Actual": batch_actual,
+                            "Predicted": pd.to_numeric(
+                                predictions,
+                                errors="coerce"
+                            )
+                        }
+                    )
+
+                    valid_graph_df = (
+                        batch_graph_df
+                        .dropna(subset=["Actual", "Predicted"])
+                        .reset_index(drop=True)
+                    )
+
+                    if not valid_graph_df.empty:
+
+                        valid_graph_df.index = (
+                            valid_graph_df.index + 1
+                        )
+
+                        valid_graph_df.index.name = "Record"
+
+                        st.subheader(
+                            "📈 Actual vs Predicted - Batch CSV"
+                        )
+
+                        st.line_chart(
+                            valid_graph_df,
+                            y=["Actual", "Predicted"],
+                            height=450
+                        )
+
+                        batch_mae = (
+                            valid_graph_df["Actual"]
+                            .sub(
+                                valid_graph_df["Predicted"]
+                            )
+                            .abs()
+                            .mean()
+                        )
+
+                        batch_rmse = (
+                            (
+                                (
+                                    valid_graph_df["Actual"]
+                                    .sub(
+                                        valid_graph_df["Predicted"]
+                                    )
+                                ) ** 2
+                            )
+                            .mean()
+                            ** 0.5
+                        )
+
+                        batch_metric_col1, batch_metric_col2 = (
+                            st.columns(2)
+                        )
+
+                        with batch_metric_col1:
+
+                            st.metric(
+                                "Batch MAE",
+                                f"{batch_mae:.4f} Parts/Hour"
+                            )
+
+                        with batch_metric_col2:
+
+                            st.metric(
+                                "Batch RMSE",
+                                f"{batch_rmse:.4f} Parts/Hour"
+                            )
+
+                        st.caption(
+                            "Actual Parts_Per_Hour is used only for "
+                            "comparison and evaluation. It is not "
+                            "passed to the prediction model."
+                        )
+
+                    else:
+
+                        st.info(
+                            "Actual Parts_Per_Hour values are present "
+                            "but no valid numeric rows were available "
+                            "for the comparison graph."
+                        )
+
+                else:
+
+                    st.info(
+                        "Actual vs Predicted graph is available when "
+                        "the uploaded CSV contains the "
+                        "`Parts_Per_Hour` column."
+                    )
 
 
                 # ==================================================
